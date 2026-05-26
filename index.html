@@ -190,7 +190,7 @@ body{
   display:grid;
   grid-template-columns:minmax(0, 1fr) minmax(420px, .95fr);
   gap:20px;
-  align-items:start;
+  align-items:stretch;
 }
 
 .dashboard-left,
@@ -199,6 +199,19 @@ body{
   flex-direction:column;
   gap:20px;
   min-width:0;
+  height:100%;
+}
+
+.dashboard-left > .grid,
+.dashboard-right > .card{
+  flex:1;
+}
+
+.dashboard-left .card,
+.dashboard-right .card{
+  display:flex;
+  flex-direction:column;
+  height:100%;
 }
 
 .metrics{
@@ -245,6 +258,13 @@ body{
   gap:20px;
   align-items:stretch;
   margin-bottom:0;
+  flex:1;
+}
+
+.grid > .card{
+  display:flex;
+  flex-direction:column;
+  height:100%;
 }
 
 @media(max-width:1100px){
@@ -1819,7 +1839,7 @@ function render(){
 
       <div class="metric-card">
         <div class="metric-label">Rendimento bruto</div>
-        <div class="metric-value";">${brl(o.rendimentoBruto)}</div>
+        <div class="metric-value">${brl(o.rendimentoBruto)}</div>
         <div class="metric-sub">+${o.retornoPct}% retorno previsto</div>
       </div>
 
