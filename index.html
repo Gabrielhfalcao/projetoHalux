@@ -685,7 +685,9 @@ body{
   display:flex;
   align-items:center;
   justify-content:center;
+  line-height: 45px;
   z-index:3;
+  border: 1px solid #c9a84c;
 }
 
 .photo-modal-close{
@@ -702,6 +704,7 @@ body{
   width:46px;
   height:46px;
   font-size:30px;
+  padding-bottom: 5px;
 }
 
 .photo-modal-arrow.prev{
@@ -730,7 +733,7 @@ body{
 .gallery-modal-box{
   width:min(1120px, 94vw);
   max-height:88vh;
-  background:#c9a84c;
+  background:#1d2f21;
   border-radius:22px;
   box-shadow:0 24px 70px rgba(0,0,0,.35);
   overflow:hidden;
@@ -744,13 +747,13 @@ body{
   justify-content:space-between;
   gap:16px;
   padding:18px 22px;
-  border-bottom:1px solid var(--border);
+  box-shadow:0 8px 14px rgba(0, 1, 2, 0.3);
 }
 
 .gallery-modal-title{
   font-size:14px;
   font-weight:800;
-  color:#111827;
+  color:#c9a84c;
   text-transform:uppercase;
   letter-spacing:.08em;
 }
@@ -774,11 +777,28 @@ body{
   gap:18px;
 }
 
+.gallery-grid::-webkit-scrollbar{
+  width:4px;
+}
+
+.gallery-grid::-webkit-scrollbar-track{
+  background:rgba(0,0,0,0.2);
+  border-radius:999px;
+}
+
+.gallery-grid::-webkit-scrollbar-thumb{
+  background:#c9a84c;
+  border-radius:999px;
+}
+
+.gallery-grid::-webkit-scrollbar-thumb:hover{
+  background:#d8b458;
+}
+
 .gallery-photo{
   position:relative;
   border-radius:18px;
   overflow:hidden;
-  border:1px solid var(--border);
   background:#f3f4f6;
   cursor:pointer;
   min-height:260px;
@@ -866,6 +886,7 @@ let fotosModal = [];
 let fotoModalIndex = 0;
 let fotosGaleriaAtual = [];
 const FOTOS_POR_PAGINA = 2;
+const imagensPrecarregadas = new Set();
 
 const TEMA_PADRAO = {
   cor:'#2563eb',
@@ -917,18 +938,63 @@ function limitarPercentual(v){
   return Math.max(0, Math.min(100, numero(v)));
 }
 
-function converterUrlDrive(url){
+function extrairIdArquivoDrive(url){
   const value = texto(url);
-  if(!value) return '';
-  if(!value.includes('drive.google.com')) return value;
 
-  let match = value.match(/\/d\/([^/]+)/);
-  if(match && match[1]) return `https://drive.google.com/uc?export=view&id=${match[1]}`;
+  if(!value){
+    return '';
+  }
 
-  match = value.match(/[?&]id=([^&]+)/);
-  if(match && match[1]) return `https://drive.google.com/uc?export=view&id=${match[1]}`;
+  const padroes = [
+    /drive\.google\.com\/file\/d\/([^/]+)/,
+    /drive\.google\.com\/open\?id=([^&]+)/,
+    /drive\.google\.com\/uc\?[^#]*[?&]id=([^&]+)/,
+    /drive\.google\.com\/thumbnail\?[^#]*[?&]id=([^&]+)/,
+    /lh3\.googleusercontent\.com\/d\/([^/?#]+)/,
+    /[?&]id=([^&]+)/
+  ];
 
-  return value;
+  for(const padrao of padroes){
+    const match = value.match(padrao);
+
+    if(match && match[1]){
+      return decodeURIComponent(match[1]);
+    }
+  }
+
+  return '';
+}
+
+function converterUrlImagem(url, largura = 1200){
+  const value = texto(url);
+
+  if(!value){
+    return '';
+  }
+
+  const ehLinkDrive =
+    value.includes('drive.google.com') ||
+    value.includes('lh3.googleusercontent.com');
+
+  if(!ehLinkDrive){
+    return value;
+  }
+
+  const idArquivo = extrairIdArquivoDrive(value);
+
+  if(!idArquivo){
+    return value;
+  }
+
+  return `https://drive.google.com/thumbnail?id=${idArquivo}&sz=w${largura}`;
+}
+
+function converterUrlDrive(url){
+  return converterUrlImagem(url, 900);
+}
+
+function converterUrlDriveAlta(url){
+  return converterUrlImagem(url, 2200);
 }
 
 async function fetchSheet(sheet){
@@ -1295,11 +1361,16 @@ function mapearFotos(fotos){
       data: valorPorColuna(f, ['C — data', 'data', 'Data'])
     }))
     .filter(f => texto(f.legenda) !== '' || texto(f.url) !== '')
-    .map(f => ({
-      legenda:texto(f.legenda),
-      url:converterUrlDrive(f.url),
-      data:texto(f.data)
-    }));
+    .map(f => {
+      const urlOriginal = texto(f.url);
+
+      return {
+        legenda:texto(f.legenda),
+        url:converterUrlDrive(urlOriginal),
+        fullUrl:converterUrlDriveAlta(urlOriginal),
+        data:texto(f.data)
+      };
+    });
 }
 
 async function carregarAbaOpcional(sheet){
@@ -1426,6 +1497,7 @@ async function loadData(){
 
     renderTabs();
     render();
+    agendarPreloadFotos();
 
     document.getElementById('status').innerText = 'Atualizado agora';
   }catch(e){
@@ -1468,12 +1540,13 @@ function mudarPaginaFotos(direcao){
 
   const totalPaginas = Math.max(1, Math.ceil(o.fotos.length / FOTOS_POR_PAGINA));
   fotoPaginaAtual = (fotoPaginaAtual + direcao + totalPaginas) % totalPaginas;
-  render();
+
+  renderFotosCarousel();
 }
 
 function irParaPaginaFotos(pagina){
   fotoPaginaAtual = pagina;
-  render();
+  renderFotosCarousel();
 }
 
 function avancarCarouselFotos(){
@@ -1492,6 +1565,153 @@ function avancarCarouselFotos(){
   mudarPaginaFotos(1);
 }
 
+
+function executarQuandoOcioso(callback, timeout = 800){
+  if('requestIdleCallback' in window){
+    requestIdleCallback(callback, { timeout });
+    return;
+  }
+
+  setTimeout(callback, 250);
+}
+
+function preloadImagem(src){
+  if(!src || imagensPrecarregadas.has(src)){
+    return;
+  }
+
+  imagensPrecarregadas.add(src);
+
+  const img = new Image();
+  img.decoding = 'async';
+  img.src = src;
+}
+
+function preloadListaImagens(urls, intervalo = 90){
+  const lista = urls.filter(url => url && !imagensPrecarregadas.has(url));
+
+  if(!lista.length){
+    return;
+  }
+
+  let indice = 0;
+
+  const carregarProxima = () => {
+    if(indice >= lista.length){
+      return;
+    }
+
+    preloadImagem(lista[indice]);
+    indice += 1;
+
+    setTimeout(carregarProxima, intervalo);
+  };
+
+  executarQuandoOcioso(carregarProxima);
+}
+
+function preloadFotosObra(obra, incluirAltaResolucao = false){
+  if(!obra || !Array.isArray(obra.fotos)){
+    return;
+  }
+
+  const urls = [];
+
+  obra.fotos.forEach(foto => {
+    if(foto.url){
+      urls.push(foto.url);
+    }
+
+    if(incluirAltaResolucao && foto.fullUrl && foto.fullUrl !== foto.url){
+      urls.push(foto.fullUrl);
+    }
+  });
+
+  preloadListaImagens(urls);
+}
+
+function agendarPreloadFotos(){
+  const obraAtiva = dados.obras.find(obra => obra.id === activeObraId);
+  const outrasObras = dados.obras.filter(obra => obra.id !== activeObraId);
+
+  executarQuandoOcioso(() => {
+    preloadFotosObra(obraAtiva, false);
+  });
+
+  executarQuandoOcioso(() => {
+    outrasObras.forEach((obra, index) => {
+      setTimeout(() => preloadFotosObra(obra, false), index * 500);
+    });
+  }, 1600);
+}
+
+function preloadProximaPaginaFotos(obra, totalPaginasFotos){
+  if(!obra || !obra.fotos || obra.fotos.length <= FOTOS_POR_PAGINA){
+    return;
+  }
+
+  const proximaPagina = (fotoPaginaAtual + 1) % totalPaginasFotos;
+  const inicio = proximaPagina * FOTOS_POR_PAGINA;
+  const fotos = obra.fotos.slice(inicio, inicio + FOTOS_POR_PAGINA);
+  const urls = fotos.map(foto => foto.url).filter(Boolean);
+
+  preloadListaImagens(urls, 50);
+}
+
+function renderFotosCarousel(){
+  const o = dados.obras.find(obra => obra.id === activeObraId);
+  if(!o) return;
+
+  const totalPaginasFotos = Math.max(1, Math.ceil(o.fotos.length / FOTOS_POR_PAGINA));
+
+  if(fotoPaginaAtual >= totalPaginasFotos){
+    fotoPaginaAtual = 0;
+  }
+
+  const inicioFotos = fotoPaginaAtual * FOTOS_POR_PAGINA;
+  const fotosPagina = o.fotos.slice(inicioFotos, inicioFotos + FOTOS_POR_PAGINA);
+  const photosWrap = document.querySelector('.photos-wrap');
+
+  if(!photosWrap){
+    return;
+  }
+
+  photosWrap.innerHTML = `
+    ${o.fotos.length > FOTOS_POR_PAGINA ? `
+      <button class="photo-nav prev" onclick="mudarPaginaFotos(-1)">‹</button>
+      <button class="photo-nav next" onclick="mudarPaginaFotos(1)">›</button>
+    ` : ''}
+
+    <div class="photos">
+      ${o.fotos.length ? fotosPagina.map((f, index) => {
+        const fotoIndexReal = inicioFotos + index;
+
+        return `
+          <div class="photo" onclick="abrirModalFoto(${fotoIndexReal})">
+            ${f.url ? `<img src="${sanitizarHTML(f.url)}" alt="${sanitizarHTML(f.legenda || 'Foto da obra')}" loading="${index === 0 ? 'eager' : 'lazy'}" decoding="async" fetchpriority="${index === 0 ? 'high' : 'auto'}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />` : ''}
+            <div class="photo-placeholder" style="${f.url ? 'display:none;' : ''}">Imagem não disponível</div>
+            <div class="photo-label">${sanitizarHTML(f.legenda || 'Sem legenda')} ${f.data ? '• ' + sanitizarHTML(f.data) : ''}</div>
+          </div>
+        `;
+      }).join('') : '<div class="empty">Nenhuma foto cadastrada para esta obra.</div>'}
+    </div>
+
+    ${o.fotos.length > FOTOS_POR_PAGINA ? `
+      <div class="photo-dots">
+        ${Array.from({ length: totalPaginasFotos }).map((_, pagina) => `
+          <button
+            class="photo-dot ${pagina === fotoPaginaAtual ? 'active' : ''}"
+            onclick="irParaPaginaFotos(${pagina})"
+            aria-label="Ir para página ${pagina + 1} de fotos"
+          ></button>
+        `).join('')}
+      </div>
+    ` : ''}
+  `;
+
+  preloadProximaPaginaFotos(o, totalPaginasFotos);
+}
+
 function abrirModalFoto(index, origemFotos){
   const o = dados.obras.find(obra => obra.id === activeObraId);
   const listaFotos = origemFotos || o?.fotos || [];
@@ -1500,6 +1720,13 @@ function abrirModalFoto(index, origemFotos){
 
   fotosModal = listaFotos;
   fotoModalIndex = index;
+
+  const fotoSelecionada = fotosModal[fotoModalIndex];
+
+  if(fotoSelecionada?.fullUrl){
+    preloadImagem(fotoSelecionada.fullUrl);
+  }
+
   atualizarModalFoto();
   document.getElementById('photoModal').classList.add('open');
 }
@@ -1520,7 +1747,7 @@ function atualizarModalFoto(){
   const foto = fotosModal[fotoModalIndex];
   if(!foto) return;
 
-  document.getElementById('photoModalImg').src = foto.url || '';
+  document.getElementById('photoModalImg').src = foto.fullUrl || foto.url || '';
   document.getElementById('photoModalCaption').innerHTML = `
     <strong>${sanitizarHTML(foto.legenda || 'Sem legenda')}</strong>
     ${foto.data ? `<br><span>${sanitizarHTML(foto.data)}</span>` : ''}
@@ -1535,7 +1762,7 @@ function abrirGaleriaFotos(){
 
   document.getElementById('galleryGrid').innerHTML = fotosGaleriaAtual.map((foto, index) => `
     <div class="gallery-photo" onclick="abrirModalFoto(${index}, fotosGaleriaAtual)">
-      ${foto.url ? `<img src="${sanitizarHTML(foto.url)}" alt="${sanitizarHTML(foto.legenda || 'Foto da obra')}" />` : '<div class="photo-placeholder">Imagem não disponível</div>'}
+      ${foto.url ? `<img src="${sanitizarHTML(foto.url)}" alt="${sanitizarHTML(foto.legenda || 'Foto da obra')}" loading="lazy" decoding="async" />` : '<div class="photo-placeholder">Imagem não disponível</div>'}
       <div class="gallery-photo-label">
         ${sanitizarHTML(foto.legenda || 'Sem legenda')} ${foto.data ? '• ' + sanitizarHTML(foto.data) : ''}
       </div>
@@ -1543,6 +1770,7 @@ function abrirGaleriaFotos(){
   `).join('');
 
   document.getElementById('galleryModal').classList.add('open');
+  executarQuandoOcioso(() => preloadFotosObra(o, true), 1200);
 }
 
 function fecharGaleriaFotos(event){
@@ -1576,14 +1804,6 @@ function render(){
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (o.progresso / 100) * circumference;
   const baseComparativo = o.valorInvestido || 0;
-  const totalPaginasFotos = Math.max(1, Math.ceil(o.fotos.length / FOTOS_POR_PAGINA));
-
-  if(fotoPaginaAtual >= totalPaginasFotos){
-    fotoPaginaAtual = 0;
-  }
-
-  const inicioFotos = fotoPaginaAtual * FOTOS_POR_PAGINA;
-  const fotosPagina = o.fotos.slice(inicioFotos, inicioFotos + FOTOS_POR_PAGINA);
 
   document.getElementById('app').innerHTML = `
     <div class="dashboard-layout">
@@ -1691,39 +1911,8 @@ function render(){
             ` : ''}
           </div>
 
-      <div class="photos-wrap">
-        ${o.fotos.length > FOTOS_POR_PAGINA ? `
-          <button class="photo-nav prev" onclick="mudarPaginaFotos(-1)">‹</button>
-          <button class="photo-nav next" onclick="mudarPaginaFotos(1)">›</button>
-        ` : ''}
-
-        <div class="photos">
-          ${o.fotos.length ? fotosPagina.map((f, index) => {
-            const fotoIndexReal = inicioFotos + index;
-
-            return `
-              <div class="photo" onclick="abrirModalFoto(${fotoIndexReal})">
-                ${f.url ? `<img src="${sanitizarHTML(f.url)}" alt="${sanitizarHTML(f.legenda || 'Foto da obra')}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />` : ''}
-                <div class="photo-placeholder" style="${f.url ? 'display:none;' : ''}">Imagem não disponível</div>
-                <div class="photo-label">${sanitizarHTML(f.legenda || 'Sem legenda')} ${f.data ? '• ' + sanitizarHTML(f.data) : ''}</div>
-              </div>
-            `;
-          }).join('') : '<div class="empty">Nenhuma foto cadastrada para esta obra.</div>'}
+      <div class="photos-wrap"></div>
         </div>
-
-        ${o.fotos.length > FOTOS_POR_PAGINA ? `
-          <div class="photo-dots">
-            ${Array.from({ length: totalPaginasFotos }).map((_, pagina) => `
-              <button
-                class="photo-dot ${pagina === fotoPaginaAtual ? 'active' : ''}"
-                onclick="irParaPaginaFotos(${pagina})"
-                aria-label="Ir para página ${pagina + 1} de fotos"
-              ></button>
-            `).join('')}
-          </div>
-        ` : ''}
-      </div>
-    </div>
 
         <div class="card">
           <div class="card-title">Comparativo de investimentos — 12 meses · ${brl(baseComparativo)}</div>
@@ -1744,6 +1933,7 @@ function render(){
 
   renderComparativo(baseComparativo);
   renderChart(baseComparativo);
+  renderFotosCarousel();
 }
 
 function renderComparativo(base){
